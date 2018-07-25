@@ -7,12 +7,12 @@ var twitch = window.Twitch.ext;
 // base url for our backend
 var backendUrl = 'https://localhost:8081';
 
-function createPollRequest(text) {
+function createPollRequest(text, textA, textB) {
 
     return {
         type: 'POST',
         url: backendUrl + '/poll/create',
-        data: {'text': text},
+        data: {'text': text, 'textA': textA, 'textB': textB},
         success: updatePoll,
         error: logError,
         headers: { 'Authorization': 'Bearer ' + token }
@@ -59,13 +59,21 @@ twitch.onAuthorized(function(auth) {
     // enable the text field
     $('#input').removeAttr('disabled');
 
+    //enable option A
+    $('#optionA').removeAttr('disabled');
+
+    //enable option B
+    $('#optionB').removeAttr('disabled');
+
     setAuth(token);
     $.ajax(queryPollRequest());
 });
 
-function updatePoll(poll) {
+function updatePoll(poll, choiceA, choiceB) {
   twitch.rig.log('Updating poll');
   $('#poll').text(poll.text);
+  $('#choiceA').text(choiceA.textA);
+  $('#choiceB').text(choiceB.textB);
 
   // enable the clear button
   $('#clear').removeAttr('disabled');
@@ -90,7 +98,9 @@ $(function() {
         if(!token) { return twitch.rig.log('Not authorized'); }
         twitch.rig.log('Creating a poll');
         var pollText = $('#input').val();
-        $.ajax(createPollRequest(pollText));
+        var optionAText = $('#optionA').val();
+        var optionBText = $('#optionB').val();
+        $.ajax(createPollRequest(pollText, optionAText, optionBText));
     });
 
     // when we hit enter while typing in the text box
