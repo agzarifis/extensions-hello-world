@@ -1,34 +1,27 @@
-var token = "";
-var tuid = "";
-var ebs = "";
+let token = "";
+let tuid = "";
 
 // because who wants to type this every time?
-var twitch = window.Twitch.ext;
+const twitch = window.Twitch.ext;
 
-// create the request options for our Twitch API calls
-var requests = {
-    set: createRequest('POST', 'cycle'),
-    get: createRequest('GET', 'query')
-};
+// base url for our backend
+const backendUrl = 'https://localhost:8081';
 
-function createRequest(type, method) {
+const noPollDefaultText = 'No poll right now';
 
-    return {
-        type: type,
-        url: 'https://localhost:8081/color/' + method,
-        success: updateBlock,
-        error: logError
-    }
-}
+function queryPollRequest() {
 
-function setAuth(token) {
-    Object.keys(requests).forEach((req) => {
-        twitch.rig.log('Setting auth headers');
-        requests[req].headers = { 'Authorization': 'Bearer ' + token }
-    });
+  return {
+    type: 'GET',
+    url: backendUrl + '/poll/query',
+    success: updatePoll,
+    error: logError,
+    headers: { 'Authorization': 'Bearer ' + token }
+  }
 }
 
 twitch.onContext(function(context) {
+    // twitch.actions.requestIdShare();
     twitch.rig.log(context);
 });
 
@@ -37,40 +30,34 @@ twitch.onAuthorized(function(auth) {
     token = auth.token;
     tuid = auth.userId;
 
-    // enable the button
-    $('#cycle').removeAttr('disabled');
+    twitch.rig.log('tuid: ' + tuid);
 
-    setAuth(token);
-    $.ajax(requests.get);
+    // Use this pattern for enabling the response buttons
+    // // enable the button
+    // $('#create').removeAttr('disabled');
+
+    $.ajax(queryPollRequest());
 });
 
-function updateBlock(hex) {
-    twitch.rig.log('Updating block color');
-    $('#color').css('background-color', hex);
+function updatePoll(poll) {
+  if (poll) {
+    twitch.rig.log('Updating poll with text: ' + poll.text);
+    $('#poll').text(poll.text);
+  } else {
+    twitch.rig.log('Updating poll with default no-poll text');
+    $('#poll').text(noPollDefaultText);
+  }
 }
 
 function logError(_, error, status) {
   twitch.rig.log('EBS request returned '+status+' ('+error+')');
 }
 
-function logSuccess(hex, status) {
-  // we could also use the output to update the block synchronously here,
-  // but we want all views to get the same broadcast response at the same time.
-  twitch.rig.log('EBS request returned '+hex+' ('+status+')');
-}
-
 $(function() {
 
-    // when we click the cycle button
-    $('#cycle').click(function() {
-        if(!token) { return twitch.rig.log('Not authorized'); }
-        twitch.rig.log('Requesting a color cycle');
-        $.ajax(requests.set);
-    });
-
     // listen for incoming broadcast message from our EBS
-    twitch.listen('broadcast', function (target, contentType, color) {
-        twitch.rig.log('Received broadcast color');
-        updateBlock(color);
+    twitch.listen('broadcast', function (target, contentType, poll) {
+        twitch.rig.log('Received broadcast poll');
+        updatePoll(poll);
     });
 });

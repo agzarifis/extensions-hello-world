@@ -40,6 +40,7 @@ const channelCooldownMs = 1000;             // maximum broadcast rate per channe
 const bearerPrefix = 'Bearer ';             // HTTP authorization headers have this prefix
 const colorWheelRotation = 30;
 const channelColors = {};
+const channelPolls = {};                    // the current poll for a channel
 const channelCooldowns = {};                // rate limit compliance
 const localRigApi = 'localhost.rig.twitch.tv:3000'
 const twitchApi = 'api.twitch.tv'
@@ -64,10 +65,16 @@ const STRINGS = {
   messageSendError: 'Error sending message to channel %s: %s',
   pubsubResponse: 'Message to c:%s returned %s',
   cyclingColor: 'Cycling color for c:%s on behalf of u:%s',
-  colorBroadcast: 'Broadcasting color %s for c:%s',
-  sendColor: 'Sending color %s to c:%s',
+  pollBroadcast: 'Broadcasting poll for c:%s',
+  sendPoll: 'Sending poll \'%s\' to c:%s',
+  sendNullPoll: 'Sending null poll to c:%s',
+  createPoll: 'Created poll with text: %s for c:%s',
+  clearPoll: 'Cleared poll for c:%s',
   cooldown: 'Please wait before clicking again',
   invalidJwt: 'Invalid JWT',
+  nonBroadcaster: 'Only the broadcaster can update the poll',
+  nonBroadcasterIdentified: 'Viewer %s is attempting to update the poll',
+  nullPoll: "The text of a poll may not be null"
 };
 
 ext.
@@ -131,58 +138,90 @@ function verifyAndDecode(header) {
   throw Boom.unauthorized(STRINGS.invalidJwt);
 }
 
-function colorCycleHandler(req) {
+function pollQueryHandler(req) {
   // Verify all requests.
   const payload = verifyAndDecode(req.headers.authorization);
+
+  // Get the current poll for the channel and return it.
   const { channel_id: channelId, opaque_user_id: opaqueUserId } = payload;
-
-  // Store the color for the channel.
-  let currentColor = channelColors[channelId] || initialColor;
-
-  // Bot abuse prevention:  don't allow a user to spam the button.
-  if (userIsInCooldown(opaqueUserId)) {
-    throw Boom.tooManyRequests(STRINGS.cooldown);
+  const currentPoll = channelPolls[channelId]
+  if (currentPoll) {
+    verboseLog(STRINGS.sendPoll, currentPoll.text, channelId);
+  } else {
+    verboseLog(STRINGS.sendNullPoll, channelId);
   }
 
-  // Rotate the color as if on a color wheel.
-  verboseLog(STRINGS.cyclingColor, channelId, opaqueUserId);
-  currentColor = color(currentColor).rotate(colorWheelRotation).hex();
-
-  // Save the new color for the channel.
-  channelColors[channelId] = currentColor;
-
-  // Broadcast the color change to all other extension instances on this channel.
-  attemptColorBroadcast(channelId);
-
-  return currentColor;
+  return currentPoll;
 }
 
-function colorQueryHandler(req) {
+function pollCreateHandler(req) {
   // Verify all requests.
   const payload = verifyAndDecode(req.headers.authorization);
 
-  // Get the color for the channel from the payload and return it.
-  const { channel_id: channelId, opaque_user_id: opaqueUserId } = payload;
-  const currentColor = color(channelColors[channelId] || initialColor).hex();
-  verboseLog(STRINGS.sendColor, currentColor, opaqueUserId);
-  return currentColor;
+  // Get the desired poll for the channel from the request.
+  const { channel_id: channelId, role: role } = payload;
+  const pollObj = req.payload;
+
+  // Only allow for updating the poll when the requesting user is the broadcaster
+  if (role === 'broadcaster') {
+
+    // Only update the poll if the text is non-null
+    if (pollObj.text) {
+
+      // Save the new poll for the channel.
+      channelPolls[channelId] = pollObj;
+
+      attemptPollBroadcast(channelId);
+
+      verboseLog(STRINGS.createPoll, pollObj.text, channelId);
+      return pollObj;
+    } else {
+      throw Boom.badRequest(STRINGS.nullPoll);
+    }
+  } else {
+    verboseLog(STRINGS.nonBroadcasterIdentified, opaque_user_id)
+    throw Boom.unauthorized(STRINGS.nonBroadcaster);
+  }
 }
 
-function attemptColorBroadcast(channelId) {
+function pollResetHandler(req) {
+  // Verify all requests.
+  const payload = verifyAndDecode(req.headers.authorization);
+
+  // Get the desired poll for the channel from the request.
+  const { channel_id: channelId, role: role } = payload;
+
+  // Only allow for clearing the poll when the requesting user is the broadcaster
+  if (role === 'broadcaster') {
+
+      // Clear the poll for the channel.
+      channelPolls[channelId] = null;
+
+      attemptPollBroadcast(channelId);
+
+      verboseLog(STRINGS.clearPoll, channelId);
+      return null
+  } else {
+    verboseLog(STRINGS.nonBroadcasterIdentified, opaque_user_id)
+    throw Boom.unauthorized(STRINGS.nonBroadcaster);
+  }
+}
+
+function attemptPollBroadcast(channelId) {
   // Check the cool-down to determine if it's okay to send now.
   const now = Date.now();
   const cooldown = channelCooldowns[channelId];
   if (!cooldown || cooldown.time < now) {
     // It is.
-    sendColorBroadcast(channelId);
+    sendPollBroadcast(channelId);
     channelCooldowns[channelId] = { time: now + channelCooldownMs };
   } else if (!cooldown.trigger) {
     // It isn't; schedule a delayed broadcast if we haven't already done so.
-    cooldown.trigger = setTimeout(sendColorBroadcast, now - cooldown.time, channelId);
+    cooldown.trigger = setTimeout(sendPollBroadcast, now - cooldown.time, channelId);
   }
 }
 
-function sendColorBroadcast(channelId) {
+function sendPollBroadcast(channelId) {
   // Set the HTTP headers required by the Twitch API.
   const headers = {
     'Client-Id': clientId,
@@ -191,15 +230,15 @@ function sendColorBroadcast(channelId) {
   };
 
   // Create the POST body for the Twitch API request.
-  const currentColor = color(channelColors[channelId] || initialColor).hex();
+  const currentPoll = channelPolls[channelId];
   const body = JSON.stringify({
     content_type: 'application/json',
-    message: currentColor,
+    message: currentPoll,
     targets: ['broadcast'],
   });
 
   // Send the broadcast request to the Twitch API.
-  verboseLog(STRINGS.colorBroadcast, currentColor, channelId);
+  verboseLog(STRINGS.pollBroadcast, channelId);
   const apiHost = ext.local ? localRigApi : twitchApi;
   request(
     `https://${apiHost}/extensions/message/${channelId}`,
@@ -245,18 +284,32 @@ function userIsInCooldown(opaqueUserId) {
 }
 
 (async () => {
-  // Handle a viewer request to cycle the color.
-  server.route({
-    method: 'POST',
-    path: '/color/cycle',
-    handler: colorCycleHandler,
-  });
-
-  // Handle a new viewer requesting the color.
+  // Handle a new viewer requesting the current poll
   server.route({
     method: 'GET',
-    path: '/color/query',
-    handler: colorQueryHandler,
+    path: '/poll/query',
+    handler: pollQueryHandler,
+  });
+
+  // Handle a viewer answering the current poll
+  // server.route({
+  //   method: 'POST',
+  //   path: '/poll/response',
+  //   handler: pollResponseHandler,
+  // });
+
+  // Handle the broadcaster defining the poll
+  server.route({
+    method: 'POST',
+    path: '/poll/create',
+    handler: pollCreateHandler,
+  });
+
+  // Handle the broadcaster clearing the current poll
+  server.route({
+    method: 'POST',
+    path: '/poll/reset',
+    handler: pollResetHandler,
   });
 
   // Start the server.
