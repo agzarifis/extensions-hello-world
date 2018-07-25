@@ -1,23 +1,13 @@
-var token = "";
-var tuid = "";
+let token = "";
+let tuid = "";
 
 // because who wants to type this every time?
-var twitch = window.Twitch.ext;
+const twitch = window.Twitch.ext;
 
 // base url for our backend
-var backendUrl = 'https://localhost:8081';
+const backendUrl = 'https://localhost:8081';
 
-function createPollRequest(text) {
-
-    return {
-        type: 'POST',
-        url: backendUrl + '/poll/create',
-        data: {'text': text},
-        success: updatePoll,
-        error: logError,
-        headers: { 'Authorization': 'Bearer ' + token }
-    }
-}
+const noPollDefaultText = 'No poll right now';
 
 function queryPollRequest() {
 
@@ -25,17 +15,6 @@ function queryPollRequest() {
     type: 'GET',
     url: backendUrl + '/poll/query',
     success: updatePoll,
-    error: logError,
-    headers: { 'Authorization': 'Bearer ' + token }
-  }
-}
-
-function clearPollRequest() {
-
-  return {
-    type: 'POST',
-    url: backendUrl + '/poll/reset',
-    success: clearPoll,
     error: logError,
     headers: { 'Authorization': 'Bearer ' + token }
   }
@@ -50,33 +29,24 @@ twitch.onAuthorized(function(auth) {
     // save our credentials
     token = auth.token;
     tuid = auth.userId;
-    twitch.rig.log('upon auth, token: ' + token);
-    twitch.rig.log('upon auth, tuid: ' + tuid);
 
-    // enable the button
-    $('#create').removeAttr('disabled');
+    twitch.rig.log('tuid: ' + tuid);
 
-    // enable the text field
-    $('#input').removeAttr('disabled');
+    // Use this pattern for enabling the response buttons
+    // // enable the button
+    // $('#create').removeAttr('disabled');
 
-    setAuth(token);
     $.ajax(queryPollRequest());
 });
 
 function updatePoll(poll) {
-  twitch.rig.log('Updating poll');
-  $('#poll').text(poll.text);
-
-  // enable the clear button
-  $('#clear').removeAttr('disabled');
-}
-
-function clearPoll(poll) {
-  twitch.rig.log('Clearing poll');
-  $('#poll').text(poll.text);
-
-  // disable the clear button
-  $('#clear').addAttr('disabled');
+  if (poll) {
+    twitch.rig.log('Updating poll with text: ' + poll.text);
+    $('#poll').text(poll.text);
+  } else {
+    twitch.rig.log('Updating poll with default no-poll text');
+    $('#poll').text(noPollDefaultText);
+  }
 }
 
 function logError(_, error, status) {
@@ -84,27 +54,6 @@ function logError(_, error, status) {
 }
 
 $(function() {
-
-    // when we click the create button
-    $('#create').click(function() {
-        if(!token) { return twitch.rig.log('Not authorized'); }
-        twitch.rig.log('Creating a poll');
-        var pollText = $('#input').val();
-        $.ajax(createPollRequest(pollText));
-    });
-
-    // when we hit enter while typing in the text box
-    $("#input").keyup(function(event) {
-        if (event.keyCode === 13) {
-            $("#create").click();
-        }
-    });
-
-    $("#clear").click(function() {
-      if(!token) { return twitch.rig.log('Not authorized'); }
-      twitch.rig.log('Clearing the poll');
-      $.ajax(clearPollRequest());
-    });
 
     // listen for incoming broadcast message from our EBS
     twitch.listen('broadcast', function (target, contentType, poll) {
