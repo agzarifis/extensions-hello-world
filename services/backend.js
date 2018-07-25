@@ -44,7 +44,6 @@ const channelPolls = {};                    // the current poll for a channel
 const channelCooldowns = {};                // rate limit compliance
 const localRigApi = 'localhost.rig.twitch.tv:3000'
 const twitchApi = 'api.twitch.tv'
-const initialPoll = {"text":"No current poll"}
 let userCooldowns = {};                     // spam prevention
 
 function missingOnline(name, variable) {
@@ -68,6 +67,7 @@ const STRINGS = {
   cyclingColor: 'Cycling color for c:%s on behalf of u:%s',
   pollBroadcast: 'Broadcasting poll for c:%s',
   sendPoll: 'Sending poll \'%s\' to c:%s',
+  sendNullPoll: 'Sending null poll to c:%s',
   createPoll: 'Created poll with text: %s for c:%s',
   clearPoll: 'Cleared poll for c:%s',
   cooldown: 'Please wait before clicking again',
@@ -144,8 +144,13 @@ function pollQueryHandler(req) {
 
   // Get the current poll for the channel and return it.
   const { channel_id: channelId, opaque_user_id: opaqueUserId } = payload;
-  const currentPoll = channelPolls[channelId] || initialPoll;
-  verboseLog(STRINGS.sendPoll, currentPoll.text, opaqueUserId);
+  const currentPoll = channelPolls[channelId]
+  if (currentPoll) {
+    verboseLog(STRINGS.sendPoll, currentPoll.text, channelId);
+  } else {
+    verboseLog(STRINGS.sendNullPoll, channelId);
+  }
+
   return currentPoll;
 }
 
@@ -195,7 +200,7 @@ function pollResetHandler(req) {
       attemptPollBroadcast(channelId);
 
       verboseLog(STRINGS.clearPoll, channelId);
-      return initialPoll;
+      return null
   } else {
     verboseLog(STRINGS.nonBroadcasterIdentified, opaque_user_id)
     throw Boom.unauthorized(STRINGS.nonBroadcaster);
@@ -225,7 +230,7 @@ function sendPollBroadcast(channelId) {
   };
 
   // Create the POST body for the Twitch API request.
-  const currentPoll = channelPolls[channelId] || initialPoll;
+  const currentPoll = channelPolls[channelId];
   const body = JSON.stringify({
     content_type: 'application/json',
     message: currentPoll,
