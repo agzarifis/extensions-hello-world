@@ -68,14 +68,17 @@ twitch.onAuthorized(function(auth) {
 });
 
 function updatePoll(poll) {
-  // erase the input field
+  // erase the input field and empty options
   $('#input').val('');
+  $('#options').empty();
 
   // if there is a poll in the response
   if (poll) {
     // update the displayed poll text with the poll
     twitch.rig.log('Updating poll with text: ' + poll.text);
     $('#poll').text(poll.text);
+    twitch.rig.log('Updating poll with options: ' + poll.options);
+    $('#choices').append("<div>poll.options</div>");
 
     // enable the clear button
     $('#clear').removeAttr('disabled');
@@ -106,8 +109,8 @@ $(function() {
   $('#create').click(function() {
     if(!token) { return twitch.rig.log('Not authorized'); }
     twitch.rig.log('Creating a poll');
-    var pollText = $('#input').val();
-    var optionText = {};
+    let pollText = $('#input').val();
+    let optionText = {};
     $('li').each(function(index) {
       optionText["option"+index] = $(this).find("input").val();
     });
