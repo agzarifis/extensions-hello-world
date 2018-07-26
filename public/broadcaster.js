@@ -108,8 +108,8 @@ $(function() {
     twitch.rig.log('Creating a poll');
     var pollText = $('#input').val();
     var optionText = {};
-    $('#option').each(function(index) {
-      optionText["option"+index] = $(this).val();
+    $('li').each(function(index) {
+      optionText["option"+index] = $(this).find("input").val();
     });
     $.ajax(createPollRequest(pollText, optionText));
   });
