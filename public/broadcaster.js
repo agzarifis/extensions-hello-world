@@ -9,12 +9,12 @@ const backendUrl = 'https://localhost:8081';
 
 const noPollDefaultText = 'No poll right now';
 
-function createPollRequest(text) {
+function createPollRequest(text, options) {
 
   return {
     type: 'POST',
     url: backendUrl + '/poll/create',
-    data: {'text': text},
+    data: {'text': text, 'options': options},
     success: updatePoll,
     error: logError,
     headers: { 'Authorization': 'Bearer ' + token }
@@ -55,11 +55,14 @@ twitch.onAuthorized(function(auth) {
 
   twitch.rig.log('upon auth, tuid: ' + tuid);
 
-  // enable the button
+  // enable the create poll button
   $('#create').removeAttr('disabled');
 
-  // enable the text field
+  // enable the poll text field
   $('#input').removeAttr('disabled');
+
+  // enable the add option button
+  $('#add_option').removeAttr('disabled');
 
   $.ajax(queryPollRequest());
 });
@@ -94,12 +97,21 @@ function logError(_, error, status) {
 
 $(function() {
 
+  //when we click the add_option button
+  $('#add_option').click(function() {
+    $('#options').append("<li> <input type='text' id='option' placeholder='Option'> </li>");
+  });
+
   // when we click the create button
   $('#create').click(function() {
     if(!token) { return twitch.rig.log('Not authorized'); }
     twitch.rig.log('Creating a poll');
     var pollText = $('#input').val();
-    $.ajax(createPollRequest(pollText));
+    var optionText = {};
+    $('#option').each(function(index) {
+      optionText["option"+index] = $(this).val();
+    });
+    $.ajax(createPollRequest(pollText, optionText));
   });
 
   // when we hit enter while typing in the text box
@@ -121,3 +133,4 @@ $(function() {
     updatePoll(poll);
   });
 });
+
