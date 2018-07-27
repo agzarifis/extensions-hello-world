@@ -9,14 +9,15 @@ const backendUrl = 'https://localhost:8081';
 
 const noPollDefaultText = 'No poll right now';
 
-function createPollRequest(text, options) {
+function createPollRequest(pollObj) {
 
   return {
     type: 'POST',
     url: backendUrl + '/poll/create',
-    data: {'text': text, 'options': options},
+    data: JSON.stringify(pollObj),
     success: updatePoll,
     error: logError,
+    contentType: "application/json; charset=utf-8",
     headers: { 'Authorization': 'Bearer ' + token }
   }
 }
@@ -77,8 +78,12 @@ function updatePoll(poll) {
     // update the displayed poll text with the poll
     twitch.rig.log('Updating poll with text: ' + poll.text);
     $('#poll').text(poll.text);
-    twitch.rig.log('Updating poll with options: ' + poll.options);
-    $('#choices').append("<div>poll.options</div>");
+    twitch.rig.log('Updating poll with options: ' + poll.options.toString().replace(/,/g,", "));
+
+    poll.options.forEach( function(optionText) {
+      $('#choices').append("<div>"+optionText+"</div>");
+    });
+
 
     // enable the clear button
     $('#clear').removeAttr('disabled');
@@ -96,6 +101,13 @@ function updatePoll(poll) {
 
 function logError(_, error, status) {
   twitch.rig.log('EBS request returned '+status+' ('+error+')');
+}
+
+function createPollObject(pollText, pollOptionsText) {
+  return {
+    "text": pollText,
+    "options": pollOptionsText
+  };
 }
 
 $(function() {
@@ -116,7 +128,9 @@ $(function() {
     $("input[id^=option]").each(function() {
       optionText.push($(this).val());
     });
-    $.ajax(createPollRequest(pollText, optionText));
+
+    let pollObj = createPollObject(pollText, optionText);
+    $.ajax(createPollRequest(pollObj));
   });
 
   // when we hit enter while typing in the text box
