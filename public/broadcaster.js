@@ -112,10 +112,9 @@ $(function() {
     if(!token) { return twitch.rig.log('Not authorized'); }
     twitch.rig.log('Creating a poll');
     let pollText = $('#input').val();
-    let optionText = {};
-    $("input[id^=option]").each(function(index) {
-      index += 1;
-      optionText["option"+index] = $(this).val();
+    let optionText = [];
+    $("input[id^=option]").each(function() {
+      optionText.push($(this).val());
     });
     $.ajax(createPollRequest(pollText, optionText));
   });
