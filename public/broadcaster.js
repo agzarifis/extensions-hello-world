@@ -102,7 +102,9 @@ $(function() {
 
   //when we click the add_option button
   $('#add_option').click(function() {
-    $('#options').append("<li> <input type='text' id='option' placeholder='Option'> </li>");
+    let lastOptionCount = parseInt($("[id^=option]").last().attr('id').substr(-1)) || 0;
+    let thisOptionCount = lastOptionCount + 1;
+    $('#options').append("<li><input type='text' id='option"+thisOptionCount+"' placeholder='Option "+thisOptionCount+"'></li>");
   });
 
   // when we click the create button
@@ -111,8 +113,9 @@ $(function() {
     twitch.rig.log('Creating a poll');
     let pollText = $('#input').val();
     let optionText = {};
-    $('li').each(function(index) {
-      optionText["option"+index] = $(this).find("input").val();
+    $("input[id^=option]").each(function(index) {
+      index += 1;
+      optionText["option"+index] = $(this).val();
     });
     $.ajax(createPollRequest(pollText, optionText));
   });
