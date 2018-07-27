@@ -102,7 +102,7 @@ $(function() {
 
   //when we click the add_option button
   $('#add_option').click(function() {
-    let lastOptionCount = parseInt($("[id^=option]").last().attr('id').substr(-1)) || 0;
+    let lastOptionCount = parseInt($("[id^=option]").last().attr('id').slice(6)) || 0;
     let thisOptionCount = lastOptionCount + 1;
     $('#options').append("<li><input type='text' id='option"+thisOptionCount+"' placeholder='Option "+thisOptionCount+"'></li>");
   });
