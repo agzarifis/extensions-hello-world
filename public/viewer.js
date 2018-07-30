@@ -40,9 +40,19 @@ twitch.onAuthorized(function(auth) {
 });
 
 function updatePoll(poll) {
+    // clear choices
+    $("input[name=choice").remove();
+
   if (poll) {
+    // update the displayed poll text with the poll
     twitch.rig.log('Updating poll with text: ' + poll.text);
     $('#poll').text(poll.text);
+
+    // update the displayed poll options with the options
+    poll.options.forEach(function(optionText) {
+        $('#choices').append("<input type='radio' name='choice' value="+optionText+"> "+optionText+" <br>");
+    });
+
   } else {
     twitch.rig.log('Updating poll with default no-poll text');
     $('#poll').text(noPollDefaultText);

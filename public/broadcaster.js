@@ -80,7 +80,7 @@ function updatePoll(poll) {
     $('#poll').text(poll.text);
     twitch.rig.log('Updating poll with options: ' + poll.options.toString().replace(/,/g,", "));
 
-    poll.options.forEach( function(optionText) {
+    poll.options.forEach(function(optionText) {
       $('#choices').append("<div>"+optionText+"</div>");
     });
 
