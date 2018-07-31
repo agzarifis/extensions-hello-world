@@ -14,6 +14,7 @@
   "author": "Emily Rose <amorelandra@twitch.tv>",
   "license": "Apache-2.0",
   "dependencies": {
+    "aws-sdk": "^2.280.1",
     "boom": "^7.2.0",
     "color": "^3.0.0",
     "commander": "^2.15.0",
