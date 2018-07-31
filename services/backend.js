@@ -18,7 +18,7 @@ const fs = require('fs');
 const Hapi = require('hapi');
 const path = require('path');
 const Boom = require('boom');
-const color = require('color');
+const AWS = require('aws-sdk');
 const ext = require('commander');
 const jwt = require('jsonwebtoken');
 const request = require('request');
@@ -31,16 +31,18 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const verboseLogging = true;
 const verboseLog = verboseLogging ? console.log.bind(console) : () => { };
 
+// AWS Config
+AWS.config.update({
+  region: "us-west-1"
+});
+
 // Service state variables
-const initialColor = color('#201fa4');      // blue now.
+const db = new AWS.DynamoDB.DocumentClient();
 const serverTokenDurationSec = 30;          // our tokens for pubsub expire after 30 seconds
 const userCooldownMs = 1000;                // maximum input rate per user to prevent bot abuse
 const userCooldownClearIntervalMs = 60000;  // interval to reset our tracking object
 const channelCooldownMs = 1000;             // maximum broadcast rate per channel
 const bearerPrefix = 'Bearer ';             // HTTP authorization headers have this prefix
-const colorWheelRotation = 30;
-const channelColors = {};
-const channelPolls = {};                    // the current poll for a channel
 const channelCooldowns = {};                // rate limit compliance
 const localRigApi = 'localhost.rig.twitch.tv:3000'
 const twitchApi = 'api.twitch.tv'
@@ -64,12 +66,14 @@ const STRINGS = {
   ownerIdMissing: missingOnline('owner ID', 'EXT_OWNER_ID'),
   messageSendError: 'Error sending message to channel %s: %s',
   pubsubResponse: 'Message to c:%s returned %s',
-  cyclingColor: 'Cycling color for c:%s on behalf of u:%s',
-  pollBroadcast: 'Broadcasting poll for c:%s',
-  sendPoll: 'Sending poll \'%s\' to c:%s',
+  messageBroadcast: 'Broadcasting %s for c:%s',
+  messageWhisper: 'Whispering %s to u:%s for c:%s',
+  sendPoll: 'Sending poll to c:%s',
   sendNullPoll: 'Sending null poll to c:%s',
   createPoll: 'Created poll with text: %s for c:%s',
   clearPoll: 'Cleared poll for c:%s',
+  updateSettings: 'Updated settings for c:%s',
+  sendSettings: 'Sending settings for c:%s',
   cooldown: 'Please wait before clicking again',
   invalidJwt: 'Invalid JWT',
   nonBroadcaster: 'Only the broadcaster can update the poll',
@@ -140,26 +144,42 @@ function verifyAndDecode(header) {
 
 function pollQueryHandler(req) {
   // Verify all requests.
-  const payload = verifyAndDecode(req.headers.authorization);
+  const authHeaders = verifyAndDecode(req.headers.authorization);
+  const { channel_id: channelId, opaque_user_id: userId } = authHeaders;
 
-  // Get the current poll for the channel and return it.
-  const { channel_id: channelId, opaque_user_id: opaqueUserId } = payload;
-  const currentPoll = channelPolls[channelId]
-  if (currentPoll) {
-    verboseLog(STRINGS.sendPoll, currentPoll.text, channelId);
-  } else {
-    verboseLog(STRINGS.sendNullPoll, channelId);
-  }
+  // Get the current poll for the channel and return it
+  const params = {
+    TableName: 'polls',
+    Key: {
+      channelId: channelId,
+    }
+  };
 
-  return currentPoll;
+  db.get(params, function(err, data) {
+    if (err) {
+      verboseLog("DB error: " + err);
+    } else {
+      let pollObj;
+      if (Object.getOwnPropertyNames(data).length === 0) {
+        pollObj = null;
+      } else {
+        pollObj = data.Item.poll;
+      }
+      verboseLog("DB success: poll for c:" + channelId + " retrieved");
+      attemptMessageSend(channelId, pollObj, "poll", userId);
+      verboseLog(STRINGS.sendPoll, channelId);
+    }
+  });
+
+  return null;
 }
 
 function pollCreateHandler(req) {
   // Verify all requests.
-  const payload = verifyAndDecode(req.headers.authorization);
+  const authHeaders = verifyAndDecode(req.headers.authorization);
 
   // Get the desired poll for the channel from the request.
-  const { channel_id: channelId, role: role } = payload;
+  const { channel_id: channelId, role: role, opaque_user_id: userId } = authHeaders;
   const pollObj = req.payload;
 
   // Only allow for updating the poll when the requesting user is the broadcaster
@@ -168,77 +188,196 @@ function pollCreateHandler(req) {
     // Only update the poll if the text is non-null
     if (pollObj.text) {
 
-      // Save the new poll for the channel.
-      channelPolls[channelId] = pollObj;
+      // Save the new poll for the channel - DB VERSION
+      let params = {
+        TableName: 'polls',
+        Item: {
+          channelId: channelId,
+          poll: pollObj
+        }
+      };
 
-      attemptPollBroadcast(channelId);
+      db.put(params, function(err, data) {
+        if (err) {
+          verboseLog("DB error: " + err);
+        } else {
+          verboseLog("DB success: " + data);
+          attemptMessageSend(channelId, pollObj, "poll");
+          verboseLog(STRINGS.createPoll, pollObj.text, channelId);
+        }
+      });
 
-      verboseLog(STRINGS.createPoll, pollObj.text, channelId);
-      return pollObj;
+      return null;
     } else {
       throw Boom.badRequest(STRINGS.nullPoll);
     }
   } else {
-    verboseLog(STRINGS.nonBroadcasterIdentified, opaque_user_id)
+    verboseLog(STRINGS.nonBroadcasterIdentified, userId);
     throw Boom.unauthorized(STRINGS.nonBroadcaster);
   }
 }
 
 function pollResetHandler(req) {
   // Verify all requests.
-  const payload = verifyAndDecode(req.headers.authorization);
-
-  // Get the desired poll for the channel from the request.
-  const { channel_id: channelId, role: role } = payload;
+  const authHeaders = verifyAndDecode(req.headers.authorization);
+  const { channel_id: channelId, role: role, opaque_user_id: userId } = authHeaders;
 
   // Only allow for clearing the poll when the requesting user is the broadcaster
   if (role === 'broadcaster') {
 
-      // Clear the poll for the channel.
-      channelPolls[channelId] = null;
+    let params = {
+      TableName: 'polls',
+      Key: {
+        channelId: channelId
+      }
+    };
 
-      attemptPollBroadcast(channelId);
+    db.delete(params, function(err, data) {
+      if (err) {
+        verboseLog("DB error: " + err);
+      } else {
+        verboseLog("DB success: " + data);
+        attemptMessageSend(channelId, null, "poll");
+        verboseLog(STRINGS.clearPoll, channelId);
+      }
+    });
 
-      verboseLog(STRINGS.clearPoll, channelId);
-      return null
+    return null
   } else {
-    verboseLog(STRINGS.nonBroadcasterIdentified, opaque_user_id)
+    verboseLog(STRINGS.nonBroadcasterIdentified, userId);
     throw Boom.unauthorized(STRINGS.nonBroadcaster);
   }
 }
 
-function attemptPollBroadcast(channelId) {
+function channelSettingsUpdateHandler(req) {
+  // Verify all requests.
+  const authHeaders = verifyAndDecode(req.headers.authorization);
+  const { channel_id: channelId, role: role, opaque_user_id: userId } = authHeaders;
+
+  const settingsObj = req.payload;
+
+  // Only allow for updating the settings when the requesting user is the broadcaster
+  if (role === 'broadcaster') {
+
+    // Only update the poll if non-null
+    if (settingsObj) {
+
+      // Save the settings for the channel
+      let params = {
+        TableName: 'channelSettings',
+        Item: {
+          channelId: channelId,
+          settings: settingsObj
+        }
+      };
+
+      db.put(params, function(err, data) {
+        if (err) {
+          verboseLog("DB error: " + err);
+        } else {
+          verboseLog("DB success: " + data);
+          attemptMessageSend(channelId, settingsObj, "success", userId);
+          verboseLog(STRINGS.updateSettings, channelId);
+        }
+      });
+
+      return null;
+    } else {
+      throw Boom.badRequest(STRINGS.nullPoll);
+    }
+  } else {
+    verboseLog(STRINGS.nonBroadcasterIdentified, userId);
+    throw Boom.unauthorized(STRINGS.nonBroadcaster);
+  }
+}
+
+function channelSettingsQueryHandler(req) {
+  // Verify all requests.
+  const authHeaders = verifyAndDecode(req.headers.authorization);
+  const { channel_id: channelId, opaque_user_id: userId } = authHeaders;
+
+  // Get the settings for the channel and return them
+  const params = {
+    TableName: 'channelSettings',
+    Key: {
+      channelId: channelId,
+    }
+  };
+
+  db.get(params, function(err, data) {
+    if (err) {
+      verboseLog("DB error: " + err);
+    } else {
+      const settingsObj = data.Item.settings;
+      verboseLog("DB success: settings for c:" + channelId + " retrieved");
+      attemptMessageSend(channelId, settingsObj, "settings", userId);
+      verboseLog(STRINGS.sendSettings, channelId);
+    }
+  });
+
+  return null;
+}
+
+function attemptMessageSend(channelId, messageContent, messageType, userId) {
   // Check the cool-down to determine if it's okay to send now.
   const now = Date.now();
   const cooldown = channelCooldowns[channelId];
   if (!cooldown || cooldown.time < now) {
     // It is.
-    sendPollBroadcast(channelId);
+    sendMessage(channelId, messageContent, messageType, userId);
     channelCooldowns[channelId] = { time: now + channelCooldownMs };
-  } else if (!cooldown.trigger) {
+  } else {
     // It isn't; schedule a delayed broadcast if we haven't already done so.
-    cooldown.trigger = setTimeout(sendPollBroadcast, now - cooldown.time, channelId);
+    setTimeout(sendMessage, now - cooldown.time, channelId, messageContent, messageType, userId);
+    channelCooldowns[channelId] = { time: now + channelCooldownMs };
   }
 }
 
-function sendPollBroadcast(channelId) {
+function determineTargets(channelId, messageType, userId) {
+  // Determine if sending to a single user or all users
+  let targets = [];
+  if (userId) {
+    targets = [userId];
+    verboseLog(STRINGS.messageWhisper, messageType, userId, channelId);
+  } else {
+    targets = ['broadcast'];
+    verboseLog(STRINGS.messageBroadcast, messageType, channelId);
+  }
+  return targets;
+}
+
+function generateHeaders(channelId) {
   // Set the HTTP headers required by the Twitch API.
-  const headers = {
+  return {
     'Client-Id': clientId,
     'Content-Type': 'application/json',
-    'Authorization': bearerPrefix + makeServerToken(channelId),
-  };
+    'Authorization': bearerPrefix + makeServerToken(channelId)
+  }
+}
 
+function generateMessage(messageContent, messageType) {
+  return {"type": messageType, "content": messageContent}
+}
+
+function createReqBody(message, targets) {
   // Create the POST body for the Twitch API request.
-  const currentPoll = channelPolls[channelId];
-  const body = JSON.stringify({
+  return JSON.stringify({
     content_type: 'application/json',
-    message: currentPoll,
-    targets: ['broadcast'],
-  });
+    message: message,
+    targets: targets,
+  })
+}
 
-  // Send the broadcast request to the Twitch API.
-  verboseLog(STRINGS.pollBroadcast, channelId);
+function sendMessage(channelId, messageContent, messageType, userId) {
+  const headers = generateHeaders(channelId);
+
+  const targets = determineTargets(channelId, messageType, userId);
+
+  const message = generateMessage(messageContent, messageType);
+
+  const body = createReqBody(message, targets);
+
+  // Send the request to the Twitch API.
   const apiHost = ext.local ? localRigApi : twitchApi;
   request(
     `https://${apiHost}/extensions/message/${channelId}`,
@@ -310,6 +449,20 @@ function userIsInCooldown(opaqueUserId) {
     method: 'POST',
     path: '/poll/reset',
     handler: pollResetHandler,
+  });
+
+  // Handle the broadcaster updating the settings
+  server.route({
+    method: 'POST',
+    path: '/settings/update',
+    handler: channelSettingsUpdateHandler,
+  });
+
+  // Handle the broadcaster/viewer querying the settings
+  server.route({
+    method: 'GET',
+    path: '/settings/query',
+    handler: channelSettingsQueryHandler,
   });
 
   // Start the server.

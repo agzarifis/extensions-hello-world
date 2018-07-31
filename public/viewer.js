@@ -1,42 +1,52 @@
-let token = "";
-let tuid = "";
-
-// because who wants to type this every time?
-const twitch = window.Twitch.ext;
-
-// base url for our backend
-const backendUrl = 'https://localhost:8081';
-
-const noPollDefaultText = 'No poll right now';
-
 function queryPollRequest() {
 
   return {
     type: 'GET',
     url: backendUrl + '/poll/query',
-    success: updatePoll,
+    error: logError,
+    headers: { 'Authorization': 'Bearer ' + token }
+  }
+}
+
+function querySettingsRequest() {
+
+  return {
+    type: 'GET',
+    url: backendUrl + '/settings/query',
     error: logError,
     headers: { 'Authorization': 'Bearer ' + token }
   }
 }
 
 twitch.onContext(function(context) {
-    // twitch.actions.requestIdShare();
-    twitch.rig.log(context);
+  // twitch.actions.requestIdShare();
+  // twitch.rig.log(context);
 });
 
 twitch.onAuthorized(function(auth) {
-    // save our credentials
-    token = auth.token;
-    tuid = auth.userId;
+  // save our credentials
+  token = auth.token;
+  tuid = auth.userId;
 
-    twitch.rig.log('tuid: ' + tuid);
+  twitch.rig.log('tuid: ' + tuid);
 
-    // Use this pattern for enabling the response buttons
-    // // enable the button
-    // $('#create').removeAttr('disabled');
+  $(function() {
 
+    // listen for incoming broadcast messages from our EBS
+    twitch.listen('broadcast', function (target, contentType, message) {
+      twitch.rig.log('Received broadcasted '+message.type+' message');
+      parseMessage(message);
+    });
+
+    // listen for incoming whisper messages from our EBS
+    twitch.listen(tuid, function (target, contentType, message) {
+      twitch.rig.log('Received whispered '+message.type+' message for uid: '+tuid);
+      parseMessage(message);
+    });
+
+    $.ajax(querySettingsRequest());
     $.ajax(queryPollRequest());
+  });
 });
 
 function updatePoll(poll) {
@@ -49,15 +59,21 @@ function updatePoll(poll) {
   }
 }
 
-function logError(_, error, status) {
-  twitch.rig.log('EBS request returned '+status+' ('+error+')');
+function loadSettings(settingsObj) {
+  twitch.rig.log('Loading the channel\'s settings');
+  $.each(settingsObj, function(settingName, settingValue) {
+    channelSettings[settingName] = settingValue;
+    applySetting(settingName, settingValue);
+  })
 }
 
-$(function() {
+function applySetting(settingName, settingValue) {
+  if (settingName === "backgroundColor") {
+    const body = $('body');
+    let style = body.attr('style');
+    style += "background-color: "+settingValue+";";
+    body.attr('style', style);
+  }
+}
 
-    // listen for incoming broadcast message from our EBS
-    twitch.listen('broadcast', function (target, contentType, poll) {
-        twitch.rig.log('Received broadcast poll');
-        updatePoll(poll);
-    });
-});
+

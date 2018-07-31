@@ -1,21 +1,9 @@
-let token = "";
-let tuid = "";
-
-// because who wants to type this every time?
-const twitch = window.Twitch.ext;
-
-// base url for our backend
-const backendUrl = 'https://localhost:8081';
-
-const noPollDefaultText = 'No poll right now';
-
 function createPollRequest(text) {
 
   return {
     type: 'POST',
     url: backendUrl + '/poll/create',
     data: {'text': text},
-    success: updatePoll,
     error: logError,
     headers: { 'Authorization': 'Bearer ' + token }
   }
@@ -26,7 +14,6 @@ function queryPollRequest() {
   return {
     type: 'GET',
     url: backendUrl + '/poll/query',
-    success: updatePoll,
     error: logError,
     headers: { 'Authorization': 'Bearer ' + token }
   }
@@ -37,7 +24,16 @@ function clearPollRequest() {
   return {
     type: 'POST',
     url: backendUrl + '/poll/reset',
-    success: updatePoll,
+    error: logError,
+    headers: { 'Authorization': 'Bearer ' + token }
+  }
+}
+
+function querySettingsRequest() {
+
+  return {
+    type: 'GET',
+    url: backendUrl + '/settings/query',
     error: logError,
     headers: { 'Authorization': 'Bearer ' + token }
   }
@@ -45,7 +41,7 @@ function clearPollRequest() {
 
 twitch.onContext(function(context) {
   // twitch.actions.requestIdShare();
-  twitch.rig.log(context);
+  // twitch.rig.log(context);
 });
 
 twitch.onAuthorized(function(auth) {
@@ -53,7 +49,7 @@ twitch.onAuthorized(function(auth) {
   token = auth.token;
   tuid = auth.userId;
 
-  twitch.rig.log('upon auth, tuid: ' + tuid);
+  twitch.rig.log('tuid: ' + tuid);
 
   // enable the button
   $('#create').removeAttr('disabled');
@@ -61,8 +57,62 @@ twitch.onAuthorized(function(auth) {
   // enable the text field
   $('#input').removeAttr('disabled');
 
-  $.ajax(queryPollRequest());
+  $(function() {
+
+    // when we click the create button
+    $('#create').click(function() {
+      if(!token) { return twitch.rig.log('Not authorized'); }
+      twitch.rig.log('Creating a poll');
+      var pollText = $('#input').val();
+      $.ajax(createPollRequest(pollText));
+    });
+
+    // when we hit enter while typing in the text box
+    $("#input").keyup(function(event) {
+      if (event.keyCode === 13) {
+        $("#create").click();
+      }
+    });
+
+    $("#clear").click(function() {
+      if(!token) { return twitch.rig.log('Not authorized'); }
+      twitch.rig.log('Clearing the poll');
+      $.ajax(clearPollRequest());
+    });
+
+    // listen for incoming broadcast message from our EBS
+    twitch.listen('broadcast', function (target, contentType, message) {
+      twitch.rig.log('Received broadcasted '+message.type+' message');
+      parseMessage(message);
+    });
+
+    // listen for incoming whisper messages from our EBS
+    twitch.listen(tuid, function (target, contentType, message) {
+      twitch.rig.log('Received whispered '+message.type+' message for uid: '+tuid);
+      parseMessage(message);
+    });
+
+    $.ajax(querySettingsRequest());
+    $.ajax(queryPollRequest());
+  });
 });
+
+function applySetting(settingName, settingValue) {
+  if (settingName === "backgroundColor") {
+    const body = $('body');
+    let style = body.attr('style');
+    style += "background-color: "+settingValue+";";
+    body.attr('style', style);
+  }
+}
+
+function loadSettings(settingsObj) {
+  twitch.rig.log('Loading the channel\'s settings');
+  $.each(settingsObj, function(settingName, settingValue) {
+    channelSettings[settingName] = settingValue;
+    applySetting(settingName, settingValue);
+  })
+}
 
 function updatePoll(poll) {
   // erase the input field
@@ -88,36 +138,4 @@ function updatePoll(poll) {
   }
 }
 
-function logError(_, error, status) {
-  twitch.rig.log('EBS request returned '+status+' ('+error+')');
-}
 
-$(function() {
-
-  // when we click the create button
-  $('#create').click(function() {
-    if(!token) { return twitch.rig.log('Not authorized'); }
-    twitch.rig.log('Creating a poll');
-    var pollText = $('#input').val();
-    $.ajax(createPollRequest(pollText));
-  });
-
-  // when we hit enter while typing in the text box
-  $("#input").keyup(function(event) {
-    if (event.keyCode === 13) {
-      $("#create").click();
-    }
-  });
-
-  $("#clear").click(function() {
-    if(!token) { return twitch.rig.log('Not authorized'); }
-    twitch.rig.log('Clearing the poll');
-    $.ajax(clearPollRequest());
-  });
-
-  // listen for incoming broadcast message from our EBS
-  twitch.listen('broadcast', function (target, contentType, poll) {
-    twitch.rig.log('Received broadcast poll');
-    updatePoll(poll);
-  });
-});
