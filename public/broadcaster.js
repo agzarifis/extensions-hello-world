@@ -1,10 +1,12 @@
 function createPollRequest(text) {
 
+
   return {
     type: 'POST',
     url: backendUrl + '/poll/create',
-    data: {'text': text},
+    data: JSON.stringify(pollObj),
     error: logError,
+    contentType: "application/json; charset=utf-8",
     headers: { 'Authorization': 'Bearer ' + token }
   }
 }
@@ -51,20 +53,29 @@ twitch.onAuthorized(function(auth) {
 
   twitch.rig.log('tuid: ' + tuid);
 
-  // enable the button
+  // enable the create poll button
   $('#create').removeAttr('disabled');
 
-  // enable the text field
+  // enable the poll text field
   $('#input').removeAttr('disabled');
-
+  
+  // enable the add option button
+  $('#add_option').removeAttr('disabled');
+  
   $(function() {
-
+    
     // when we click the create button
     $('#create').click(function() {
       if(!token) { return twitch.rig.log('Not authorized'); }
       twitch.rig.log('Creating a poll');
-      var pollText = $('#input').val();
-      $.ajax(createPollRequest(pollText));
+      let pollText = $('#input').val();
+      let optionText = [];
+      $("input[id^=option]").each(function() {
+        optionText.push($(this).val());
+      });
+
+      let pollObj = createPollObject(pollText, optionText);
+      $.ajax(createPollRequest(pollObj));
     });
 
     // when we hit enter while typing in the text box
@@ -72,6 +83,13 @@ twitch.onAuthorized(function(auth) {
       if (event.keyCode === 13) {
         $("#create").click();
       }
+    });
+    
+    //when we click the add_option button
+    $('#add_option').click(function() {
+      let lastOptionCount = parseInt($("[id^=option]").last().attr('id').slice(6)) || 0;
+      let thisOptionCount = lastOptionCount + 1;
+      $('#options').append("<li><input type='text' id='option"+thisOptionCount+"' placeholder='Option "+thisOptionCount+"'></li>");
     });
 
     $("#clear").click(function() {
@@ -115,14 +133,21 @@ function loadSettings(settingsObj) {
 }
 
 function updatePoll(poll) {
-  // erase the input field
+  // erase the input field and empty options
   $('#input').val('');
+  $('#options').empty();
 
   // if there is a poll in the response
   if (poll) {
     // update the displayed poll text with the poll
     twitch.rig.log('Updating poll with text: ' + poll.text);
     $('#poll').text(poll.text);
+    twitch.rig.log('Updating poll with options: ' + poll.options.toString().replace(/,/g,", "));
+
+    poll.options.forEach(function(optionText) {
+      $('#choices').append("<div>"+optionText+"</div>");
+    });
+
 
     // enable the clear button
     $('#clear').removeAttr('disabled');
@@ -138,4 +163,9 @@ function updatePoll(poll) {
   }
 }
 
-
+function createPollObject(pollText, pollOptionsText) {
+  return {
+    "text": pollText,
+    "options": pollOptionsText
+  };
+}

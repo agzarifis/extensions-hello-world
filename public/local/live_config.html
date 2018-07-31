@@ -16,6 +16,10 @@
         <p>Would you care to create a poll?</p>
         <div>
             <input type="text" id="input" disabled="disabled" placeholder="Enter a question"/>
+            <ul id="options" style="list-style-type:none"></ul>
+        </div>
+        <div>
+            <input type="button" id="add_option" disabled value="Add option" />
         </div>
         <div>
             <input type="button" id="create" disabled="disabled" value="Create poll" />
@@ -25,5 +29,6 @@
         </div>
         <h3>Poll down here</h3>
         <div id="poll"></div>
+        <div id="choices"></div>
     </body>
 </html>
