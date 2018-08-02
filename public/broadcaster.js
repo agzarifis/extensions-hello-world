@@ -1,4 +1,4 @@
-function createPollRequest(text) {
+function createPollRequest(pollObj) {
 
 
   return {

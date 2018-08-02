@@ -51,7 +51,7 @@ twitch.onAuthorized(function(auth) {
 
 function updatePoll(poll) {
     // clear choices
-    $("input[name=choice").remove();
+    $("input[name=choice]").remove();
 
   if (poll) {
     // update the displayed poll text with the poll
