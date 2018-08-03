@@ -145,41 +145,64 @@ function verifyAndDecode(header) {
 function pollQueryHandler(req) {
   // Verify all requests.
   const authHeaders = verifyAndDecode(req.headers.authorization);
-  const { channel_id: channelId, opaque_user_id: userId } = authHeaders;
+  const channelId = authHeaders.channel_id;
+  return dbGet('polls', 'poll', {"channelId":channelId});
+}
 
-  // Get the current poll for the channel and return it
-  const params = {
-    TableName: 'polls',
-    Key: {
-      channelId: channelId,
-    }
-  };
+function channelSettingsQueryHandler(req) {
+  // Verify all requests.
+  const authHeaders = verifyAndDecode(req.headers.authorization);
+  const channelId = authHeaders.channel_id;
+  return dbGet("channelSettings", "settings", {"channelId":channelId});
+}
 
-  db.get(params, function(err, data) {
-    if (err) {
-      verboseLog("DB error: " + err);
-    } else {
-      let pollObj;
-      if (Object.getOwnPropertyNames(data).length === 0) {
-        pollObj = null;
+function dbGet(tableName, objName, keys) {
+  const params = {};
+  params["TableName"] = tableName;
+  params["Key"] = {};
+  Object.keys(keys).forEach(key => params["Key"][key] = keys[key]);
+
+  return db.get(params).promise()
+    .then( function(response) {
+      if (response.Item) {
+        verboseLog("DB success: "+objName+" from t:"+tableName+" for " + keys.toString() + " retrieved");
+        return response.Item[objName];
       } else {
-        pollObj = data.Item.poll;
+        verboseLog("DB success: No "+objName+" found in t:"+tableName+" for " + keys.toString());
+        return null;
       }
-      verboseLog("DB success: poll for c:" + channelId + " retrieved");
-      attemptMessageSend(channelId, pollObj, "poll", userId);
-      verboseLog(STRINGS.sendPoll, channelId);
-    }
-  });
+    })
+    .catch( function(err) {
+      verboseLog("DB error: " + err);
+      return err;
+    });
+}
 
-  return null;
+function dbPut(tableName, items) {
+  const params = {};
+  params["TableName"] = tableName;
+  params["Item"] = {};
+  Object.keys(items).forEach(key => params["Item"][key] = items[key]);
+
+  return db.put(params).promise();
+}
+
+function dbDelete(tableName, keys) {
+  const params = {};
+  params["TableName"] = tableName;
+  params["Key"] = {};
+  Object.keys(keys).forEach(key => params["Key"][key] = keys[key]);
+
+  return db.delete(params).promise()
 }
 
 function pollCreateHandler(req) {
   // Verify all requests.
   const authHeaders = verifyAndDecode(req.headers.authorization);
 
-  // Get the desired poll for the channel from the request.
   const { channel_id: channelId, role: role, opaque_user_id: userId } = authHeaders;
+
+  // Get the desired poll for the channel from the request.
   const pollObj = req.payload;
 
   // Only allow for updating the poll when the requesting user is the broadcaster
@@ -188,26 +211,19 @@ function pollCreateHandler(req) {
     // Only update the poll if the text is non-null
     if (pollObj.text) {
 
-      // Save the new poll for the channel - DB VERSION
-      let params = {
-        TableName: 'polls',
-        Item: {
-          channelId: channelId,
-          poll: pollObj
-        }
-      };
-
-      db.put(params, function(err, data) {
-        if (err) {
-          verboseLog("DB error: " + err);
-        } else {
-          verboseLog("DB success: " + data);
+      // Save the new poll for the channel in the db
+      // upon success, broadcast the new poll to all viewers
+      return dbPut("polls", {"channelId":channelId, "poll":pollObj})
+        .then( function() {
+          verboseLog("DB success: poll created");
           attemptMessageSend(channelId, pollObj, "poll");
-          verboseLog(STRINGS.createPoll, pollObj.text, channelId);
-        }
-      });
+          return pollObj;
+        })
+        .catch( function(err) {
+          verboseLog("DB error: " + err);
+          return err;
+        });
 
-      return null;
     } else {
       throw Boom.badRequest(STRINGS.nullPoll);
     }
@@ -225,24 +241,17 @@ function pollResetHandler(req) {
   // Only allow for clearing the poll when the requesting user is the broadcaster
   if (role === 'broadcaster') {
 
-    let params = {
-      TableName: 'polls',
-      Key: {
-        channelId: channelId
-      }
-    };
-
-    db.delete(params, function(err, data) {
-      if (err) {
-        verboseLog("DB error: " + err);
-      } else {
-        verboseLog("DB success: " + data);
+    return dbDelete("polls", {"channelId":channelId})
+      .then( function() {
+        verboseLog("DB success: poll reset");
         attemptMessageSend(channelId, null, "poll");
         verboseLog(STRINGS.clearPoll, channelId);
-      }
-    });
+      })
+      .catch( function(err) {
+        verboseLog("DB error: " + err);
+        return err;
+      });
 
-    return null
   } else {
     verboseLog(STRINGS.nonBroadcasterIdentified, userId);
     throw Boom.unauthorized(STRINGS.nonBroadcaster);
@@ -259,29 +268,20 @@ function channelSettingsUpdateHandler(req) {
   // Only allow for updating the settings when the requesting user is the broadcaster
   if (role === 'broadcaster') {
 
-    // Only update the poll if non-null
+    // Only update the settings if non-null
     if (settingsObj) {
 
-      // Save the settings for the channel
-      let params = {
-        TableName: 'channelSettings',
-        Item: {
-          channelId: channelId,
-          settings: settingsObj
-        }
-      };
-
-      db.put(params, function(err, data) {
-        if (err) {
+      // Save the new settings for the channel in the db
+      return dbPut("channelSettings", {"channelId":channelId, "settings":settingsObj})
+        .then( function() {
+          verboseLog("DB success: settings updated");
+          return settingsObj;
+        })
+        .catch( function(err) {
           verboseLog("DB error: " + err);
-        } else {
-          verboseLog("DB success: " + data);
-          attemptMessageSend(channelId, settingsObj, "success", userId);
-          verboseLog(STRINGS.updateSettings, channelId);
-        }
-      });
+          return err;
+        })
 
-      return null;
     } else {
       throw Boom.badRequest(STRINGS.nullPoll);
     }
@@ -289,33 +289,6 @@ function channelSettingsUpdateHandler(req) {
     verboseLog(STRINGS.nonBroadcasterIdentified, userId);
     throw Boom.unauthorized(STRINGS.nonBroadcaster);
   }
-}
-
-function channelSettingsQueryHandler(req) {
-  // Verify all requests.
-  const authHeaders = verifyAndDecode(req.headers.authorization);
-  const { channel_id: channelId, opaque_user_id: userId } = authHeaders;
-
-  // Get the settings for the channel and return them
-  const params = {
-    TableName: 'channelSettings',
-    Key: {
-      channelId: channelId,
-    }
-  };
-
-  db.get(params, function(err, data) {
-    if (err) {
-      verboseLog("DB error: " + err);
-    } else {
-      const settingsObj = data.Item.settings;
-      verboseLog("DB success: settings for c:" + channelId + " retrieved");
-      attemptMessageSend(channelId, settingsObj, "settings", userId);
-      verboseLog(STRINGS.sendSettings, channelId);
-    }
-  });
-
-  return null;
 }
 
 function attemptMessageSend(channelId, messageContent, messageType, userId) {

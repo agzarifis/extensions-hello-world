@@ -3,6 +3,7 @@ function queryPollRequest() {
   return {
     type: 'GET',
     url: backendUrl + '/poll/query',
+    success: updatePoll,
     error: logError,
     headers: { 'Authorization': 'Bearer ' + token }
   }
@@ -13,6 +14,7 @@ function querySettingsRequest() {
   return {
     type: 'GET',
     url: backendUrl + '/settings/query',
+    success: loadSettings,
     error: logError,
     headers: { 'Authorization': 'Bearer ' + token }
   }
@@ -51,7 +53,7 @@ twitch.onAuthorized(function(auth) {
 
 function updatePoll(poll) {
     // clear choices
-    $("input[name=choice").remove();
+    $("input[name=choice]").remove();
 
   if (poll) {
     // update the displayed poll text with the poll

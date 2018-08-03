@@ -22,10 +22,6 @@ function parseMessage(message) {
   }
 }
 
-function updateFeedback(settingsObj) {
-  $("#feedback").text(settingsSuccessMessage);
-}
-
 function logError(_, error, status) {
   twitch.rig.log('EBS request returned '+status+' ('+error+')');
 }

@@ -6,6 +6,7 @@ function saveSettingsRequest(settingsObj) {
     type: 'POST',
     url: backendUrl + '/settings/update',
     data: JSON.stringify(settingsObj),
+    success: updateFeedback,
     error: logError,
     contentType: "application/json; charset=utf-8",
     headers: { 'Authorization': 'Bearer ' + token }
@@ -17,6 +18,7 @@ function querySettingsRequest() {
   return {
     type: 'GET',
     url: backendUrl + '/settings/query',
+    success: loadSettings,
     error: logError,
     headers: { 'Authorization': 'Bearer ' + token }
   }
@@ -71,4 +73,8 @@ function loadSettings(settingsObj) {
 
 function prefillForm(settingName, settingValue) {
   $("input[name='"+settingName+"'][value='"+settingValue+"']").attr('checked','true');
+}
+
+function updateFeedback(settingsObj) {
+  $("#feedback").text(settingsSuccessMessage);
 }
